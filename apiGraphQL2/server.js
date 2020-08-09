@@ -31,6 +31,17 @@ class User {
   }
 }
 
+// If User had any complex fields, we'd put them on this object.
+class Comment {
+  constructor(id, post,name, email, body) {
+    this.id = id;
+    this.post = post;
+    this.name = name;
+    this.email = email;
+    this.body = body;
+  }
+}
+
 // Maps username to content
 var fakeDatabase = {};
 
@@ -162,6 +173,13 @@ var root = {
          userResult[0].website,
          userResult[0].address); ;
   },
+
+  async getComment({id}) {
+    let commentResult = await requestComment(id);
+    console.log(commentResult);
+
+      return new Comment();
+  }
   async authorizeWithGithub({code}) {
 
   // 1. Obtain data from GitHub
@@ -185,6 +203,18 @@ var root = {
 
 };
 
+const request = id =>
+  fetch(`https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/users?id=${id}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json"
+    },
+  })
+    .then(res => res.json())
+    .catch(error => {
+      throw new Error(JSON.stringify(error));
+    });
 
 
 const requestUser = id =>
