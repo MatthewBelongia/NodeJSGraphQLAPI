@@ -7,6 +7,8 @@ const request = require('graphql-request');
 
 let currentUser;
 
+
+// access env CONSTANTS in .env file
 dotenv.config();
 
 // If Message had any complex fields, we'd put them on this object.
@@ -31,7 +33,7 @@ class User {
   }
 }
 
-// If User had any complex fields, we'd put them on this object.
+// If Comment had any complex fields, we'd put them on this object.
 class Comment {
   constructor(id, post,name, email, body) {
     this.id = id;
@@ -39,6 +41,17 @@ class Comment {
     this.name = name;
     this.email = email;
     this.body = body;
+  }
+}
+
+// If Post had any complex fields, we'd put them on this object.
+class Post {
+  constructor(id, user,title, body, comments) {
+    this.id = id;
+    this.user = user;
+    this.title = title;
+    this.body = body;
+    this.comments = comments;
   }
 }
 
@@ -124,6 +137,10 @@ var schema = buildSchema(`
 `);
 
 var root = {
+
+/// Messages
+
+
   getMessage: ({id}) => {
     if (!fakeDatabase[id]) {
       throw new Error('no message exists with id ' + id);
@@ -153,14 +170,28 @@ var root = {
     delete fakeDatabase[id];
     return "Message with id :" + id + " removed from database";
   },
+
+
+/// GitHub Auth Data
+
+
   githubLoginUrl: () => {
       return `https://github.com/login/oauth/authorize?client_id=${process.env.CLIENT_ID}&scope=user`;
   },
+
+
+
+  // custom query with library?
   queryRequest: ({queryInput}) => {
     request("https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/db", queryInput)
       .then(console.log)
       .catch(console.error);
   },
+
+
+
+
+  //  helper async fetch functions
   async getUser ({id}) {
       let userResult =  await requestUser(id);
       console.log(userResult);
@@ -178,8 +209,30 @@ var root = {
     let commentResult = await requestComment(id);
     console.log(commentResult);
 
-      return new Comment();
-  }
+      return new Comment( commentResult[0].id,
+                          commentResult[0].post,
+                          commentResult[0].name,
+                          commentResult[0].email,
+                          commentResult[0].body
+                        );
+  },
+
+  async getPost({id}) {
+    let postResult = await requestPost(id);
+    console.log(postResult);
+
+      return new Post( postResult[0].id,
+                          postResult[0].user,
+                          postResult[0].title,
+                          postResult[0].body,
+                          postResult[0].comments
+                        );
+  },
+
+
+
+  // Acquiring auth data from github
+
   async authorizeWithGithub({code}) {
 
   // 1. Obtain data from GitHub
@@ -203,8 +256,15 @@ var root = {
 
 };
 
-const request = id =>
-  fetch(`https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/users?id=${id}`, {
+
+//
+// Backend http calls to my json server as fake database
+//
+
+
+// get post comment data with fetch
+const requestPost = id =>
+  fetch(`https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/posts?id=${id}`, {
     method: "GET",
     headers: {
       "Content-Type": "application/json",
@@ -217,6 +277,44 @@ const request = id =>
     });
 
 
+
+    /// TODO
+    /////// write the GraphQL Queries in a file, have the api consume string or named api calls
+    /// with simple String or number  parameter inputs that is then inserted into the
+    //////  graphQL structured language
+
+
+
+//get comment json data
+const requestComment = id =>
+  fetch(`https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/comments?id=${id}`, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json"
+    },
+  })
+    .then(res => res.json())
+    .catch(error => {
+      throw new Error(JSON.stringify(error));
+    });
+
+// get all comments from a particular Post with fetch
+const requestCommentsFromPost = id =>
+    fetch(`https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/post?id=${id}`, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+      })
+        .then(res => res.json())
+        .catch(error => {
+          throw new Error(JSON.stringify(error));
+  });
+
+
+//get user json data
 const requestUser = id =>
   fetch(`https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/users?id=${id}`, {
     method: "GET",
@@ -231,6 +329,7 @@ const requestUser = id =>
     });
 
 
+// http call to github api for token auth code
 const requestGithubToken = credentials =>
   fetch("https://github.com/login/oauth/access_token", {
     method: "POST",
@@ -245,7 +344,7 @@ const requestGithubToken = credentials =>
       throw new Error(JSON.stringify(error));
     });
 
-
+// http call to github api for user account details
  const requestGithubUserAccount = token =>
    fetch(`https://api.github.com/user?access_token=${token}`, {
      method: "GET",
@@ -262,7 +361,7 @@ const requestGithubToken = credentials =>
      });
 
 
-
+// Helper functoin to call for token and GitHub user data and place in one obj
 const requestGithubUser = async credentials => {
 
     const { access_token } = await requestGithubToken(credentials);
@@ -270,6 +369,8 @@ const requestGithubUser = async credentials => {
     return { ...githubUser, access_token };
   };
 
+
+// helper library for browser text editor at /graphql for custom query and autofill
 var app = express();
 app.use('/graphql', graphqlHTTP({
   schema: schema,
