@@ -4,56 +4,41 @@ var { buildSchema } = require('graphql');
 const fetch = require('node-fetch');
 const dotenv = require('dotenv');
 const request = require('graphql-request');
-
-let currentUser;
-
+const User = require('./user.js');
+const Message = require('./message.js');
+const Post = require('./post.js');
+const Comment = require('./comment.js');
+const passport = require('passport');
+var GitHubStrategy = require('passport-github2').Strategy;
+var session = require('express-session');
+var cookieParser = require('cookie-parser');
 
 // access env CONSTANTS in .env file
 dotenv.config();
 
-// If Message had any complex fields, we'd put them on this object.
-class Message {
-  constructor(id, {content, author}) {
-    this.id = id;
-    this.content = content;
-    this.author = author;
-  }
-}
+// Use the GitHubStrategy within Passport.
+//   Strategies in Passport require a `verify` function, which accept
+//   credentials (in this case, an accessToken, refreshToken, and GitHub
+//   profile), and invoke a callback with a user object.
+passport.use(new GitHubStrategy({
+    clientID: process.env.CLIENT_ID,
+    clientSecret: process.env.CLIENT_SECRET,
+    callbackURL: "http://localhost:4000/auth/github/callback"
+  },
+  function(accessToken, refreshToken, profile, done) {
+    // asynchronous verification, for effect...
+    process.nextTick(function () {
 
-// If User had any complex fields, we'd put them on this object.
-class User {
-  constructor(id, name,username, email, phone, website, address) {
-    this.id = id;
-    this.name = name;
-    this.username = username;
-    this.email = email;
-    this.phone = phone;
-    this.website = website;
-    this.address = address;
+      // To keep the example simple, the user's GitHub profile is returned to
+      // represent the logged-in user.  In a typical application, you would want
+      // to associate the GitHub account with a user record in your database,
+      // and return that user instead.
+      return done(null, profile);
+    });
   }
-}
+));
 
-// If Comment had any complex fields, we'd put them on this object.
-class Comment {
-  constructor(id, post,name, email, body) {
-    this.id = id;
-    this.post = post;
-    this.name = name;
-    this.email = email;
-    this.body = body;
-  }
-}
-
-// If Post had any complex fields, we'd put them on this object.
-class Post {
-  constructor(id, user,title, body, comments) {
-    this.id = id;
-    this.user = user;
-    this.title = title;
-    this.body = body;
-    this.comments = comments;
-  }
-}
+let currentUser;
 
 // Maps username to content
 var fakeDatabase = {};
@@ -99,6 +84,39 @@ var schema = buildSchema(`
     author: String
   }
 
+  input PostInput {
+    id: Int
+    user: UserInput
+    title: String
+    body: String
+    comments: [CommentInput]
+  }
+
+  input UserInput {
+    id: Int!
+    name: String!
+    username: String
+    email: String
+    phone: String
+    website: String
+    address: UserAddressInput
+  }
+
+  input CommentInput {
+    id: Int
+    post: Int
+    name: String
+    email: String
+    body: String
+  }
+
+  input UserAddressInput {
+    street: String
+    suite: String
+    city: String
+    zipcode: String
+  }
+
   type Message {
     id: ID!
     content: String
@@ -111,7 +129,7 @@ var schema = buildSchema(`
     getUser(id: ID!): User
     getPost(id: ID): Post
     getComment(id: ID): Comment
-    getCommentFromPost(id: ID): Comment
+    getCommentsFromPost(id: ID): [Comment]
     queryRequest(query: String): String
   }
 
@@ -131,69 +149,29 @@ var schema = buildSchema(`
     updateMessage(id: ID!, input: MessageInput): Message
     deleteMessage(id: String): String
     authorizeWithGithub(code: String!): AuthPayload!
-    updatePost(id: ID): Post
+    updatePost(id: ID, input: PostInput): Post
     deletePost(id: ID): Post
   }
 `);
 
 var root = {
 
-/// Messages
-
-
-  getMessage: ({id}) => {
-    if (!fakeDatabase[id]) {
-      throw new Error('no message exists with id ' + id);
-    }
-    return new Message(id, fakeDatabase[id]);
-  },
-  createMessage: ({input}) => {
-    // Create a random id for our "database".
-    var id = require('crypto').randomBytes(10).toString('hex');
-
-    fakeDatabase[id] = input;
-    return new Message(id, input);
-  },
-  updateMessage: ({id, input}) => {
-    if (!fakeDatabase[id]) {
-      throw new Error('no message exists with id ' + id);
-    }
-    // This replaces all old data, but some apps might want partial update.
-    fakeDatabase[id] = input;
-    return new Message(id, input);
-  },
-  deleteMessage: ({id}) => {
-    if (!fakeDatabase[id]) {
-      throw new Error('no message exists with id ' + id);
-    }
-    // This replaces all old data, but some apps might want partial update.
-    delete fakeDatabase[id];
-    return "Message with id :" + id + " removed from database";
-  },
-
-
 /// GitHub Auth Data
-
-
   githubLoginUrl: () => {
       return `https://github.com/login/oauth/authorize?client_id=${process.env.CLIENT_ID}&scope=user`;
   },
 
-
-
   // custom query with library?
+  // come back to this
   queryRequest: ({queryInput}) => {
     request("https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/db", queryInput)
       .then(console.log)
       .catch(console.error);
   },
 
-
-
-
   //  helper async fetch functions
   async getUser ({id}) {
-      let userResult =  await requestUser(id);
+      let userResult =  await requestUserWithFetch(id);
       console.log(userResult);
 
       return new User(userResult[0].id,
@@ -206,7 +184,7 @@ var root = {
   },
 
   async getComment({id}) {
-    let commentResult = await requestComment(id);
+    let commentResult = await requestCommentWithFetch(id);
     console.log(commentResult);
 
       return new Comment( commentResult[0].id,
@@ -218,7 +196,8 @@ var root = {
   },
 
   async getPost({id}) {
-    let postResult = await requestPost(id);
+    console.log("getPost called");
+    let postResult = await requestPostWithFetch(id);
     console.log(postResult);
 
       return new Post( postResult[0].id,
@@ -229,10 +208,42 @@ var root = {
                         );
   },
 
+  async getCommentsFromPost ({id}) {
+    console.log("getCommentsFromPost called");
+    console.log(id);
+    const query = JSON.stringify({
+      query: `query {
+                    	getPost(id: ${id})
+                    		{
+                    			id
+                          comments{
+                            id
+                            body
+                            email
+                            name
+                          }
+                    		}
+                      }
+               `
+             })
 
+      const response = await fetch(
+        "http://localhost:4000/graphql",
+          {
+              headers: {'Content-Type': 'application/json'},
+              method: 'POST',
+              body: query,
+          });
+
+          const responseJson = await response.json();
+          console.log("responseJson::");
+          console.log(responseJson.data);
+          return responseJson.data.getPost.comments;
+
+
+  },
 
   // Acquiring auth data from github
-
   async authorizeWithGithub({code}) {
 
   // 1. Obtain data from GitHub
@@ -254,16 +265,80 @@ var root = {
     return { githubToken: currentUser.githubToken, user: currentUser };
   },
 
-};
+  async updatePost({id, input}) {
+      let updatedPost = await updatePostWithFetch(id, input)
+      return { updatedPost };
+  },
+  async deletePost({id}){
+    await deletePostWithFetch(id);
+  },
 
+  /// Messages
+    getMessage: ({id}) => {
+      if (!fakeDatabase[id]) {
+        throw new Error('no message exists with id ' + id);
+      }
+      return new Message(id, fakeDatabase[id]);
+    },
+    createMessage: ({input}) => {
+      // Create a random id for our "database".
+      var id = require('crypto').randomBytes(10).toString('hex');
+
+      fakeDatabase[id] = input;
+      return new Message(id, input);
+    },
+    updateMessage: ({id, input}) => {
+      if (!fakeDatabase[id]) {
+        throw new Error('no message exists with id ' + id);
+      }
+      // This replaces all old data, but some apps might want partial update.
+      fakeDatabase[id] = input;
+      return new Message(id, input);
+    },
+    deleteMessage: ({id}) => {
+      if (!fakeDatabase[id]) {
+        throw new Error('no message exists with id ' + id);
+      }
+      // This replaces all old data, but some apps might want partial update.
+      delete fakeDatabase[id];
+      return "Message with id :" + id + " removed from database";
+    },
+};
 
 //
 // Backend http calls to my json server as fake database
 //
 
+// http call to update Posts
+function updatePostWithFetch(id, input) {
+  const response = fetch(`https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/posts/id=${id}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json"
+    },
+    body: JSON.stringify(input)
+  })
+    .then(res => res.json())
+    .catch(error => {
+      throw new Error(JSON.stringify(error));
+    });
+    return response;
+}
+
+// http call to delete Posts
+function deletePostWithFetch(id) {
+  fetch(`https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/posts/id=${id}`, {
+    method: "DELETE",
+  })
+    .then(res => res.json())
+    .catch(error => {
+      throw new Error(JSON.stringify(error));
+    });
+}
 
 // get post comment data with fetch
-const requestPost = id =>
+const requestPostWithFetch = id =>
   fetch(`https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/posts?id=${id}`, {
     method: "GET",
     headers: {
@@ -276,17 +351,13 @@ const requestPost = id =>
       throw new Error(JSON.stringify(error));
     });
 
-
-
     /// TODO
     /////// write the GraphQL Queries in a file, have the api consume string or named api calls
     /// with simple String or number  parameter inputs that is then inserted into the
     //////  graphQL structured language
 
-
-
 //get comment json data
-const requestComment = id =>
+const requestCommentWithFetch = id =>
   fetch(`https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/comments?id=${id}`, {
     method: "GET",
     headers: {
@@ -315,7 +386,7 @@ const requestCommentsFromPost = id =>
 
 
 //get user json data
-const requestUser = id =>
+const requestUserWithFetch = id =>
   fetch(`https://my-json-server.typicode.com/MatthewBelongia/jsonPlaceHolder/users?id=${id}`, {
     method: "GET",
     headers: {
@@ -361,7 +432,7 @@ const requestGithubToken = credentials =>
      });
 
 
-// Helper functoin to call for token and GitHub user data and place in one obj
+// Helper function to call for token and GitHub user data and place in one obj
 const requestGithubUser = async credentials => {
 
     const { access_token } = await requestGithubToken(credentials);
@@ -370,13 +441,57 @@ const requestGithubUser = async credentials => {
   };
 
 
+passport.serializeUser(function(user, done) {
+    done(null, user);
+  });
+
+passport.deserializeUser(function(user, done) {
+    done(null, user);
+  });
+
+
 // helper library for browser text editor at /graphql for custom query and autofill
 var app = express();
-app.use('/graphql', graphqlHTTP({
-  schema: schema,
-  rootValue: root,
-  graphiql: true,
-}));
+app.use(cookieParser());
+app.use(session({secret: "secretpw"}));
+
+
+app.use(passport.initialize());
+app.use(passport.session());
+
+app.get('/auth/github',
+  passport.authenticate('github', { scope: [ 'user:email' ] }));
+
+app.get('/auth/github/callback',
+  passport.authenticate('github', { failureRedirect: '/login' }),
+  function(req, res) {
+    // Successful authentication, redirect home.
+    console.log('after github callback');
+    if (req.user) {
+        console.log('redirected to /graphql');
+        res.redirect('/graphql')
+        //res.status(200).end('something');
+    } else {
+        res.status(500).end('Not authenticated by GitHub, please log in');
+        next();
+    }
+  });
+
+app.use('/graphql',
+ensureAuthenticated,
+ graphqlHTTP({
+    schema: schema,
+    rootValue: root,
+    graphiql: true,
+  }));
+
 app.listen(4000, () => {
   console.log('Running a GraphQL API server at localhost:4000/graphql');
 });
+
+function ensureAuthenticated(req, res, next) {
+  console.log("isAuthed");
+  console.log(req.isAuthenticated());
+  if (req.isAuthenticated()) { return next(); }
+  res.redirect('/auth/github')
+}
