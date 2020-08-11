@@ -23,9 +23,10 @@ dotenv.config();
 passport.use(new GitHubStrategy({
     clientID: process.env.CLIENT_ID,
     clientSecret: process.env.CLIENT_SECRET,
-    callbackURL: "http://localhost:4000/auth/github/callback"
+    callbackURL: process.env.AUTH_HOST_IP + "/auth/github/callback"
   },
   function(accessToken, refreshToken, profile, done) {
+
     // asynchronous verification, for effect...
     process.nextTick(function () {
 
@@ -228,7 +229,7 @@ var root = {
              })
 
       const response = await fetch(
-        "http://localhost:4000/graphql",
+        process.env.AUTH_HOST_IP + "/graphql",
           {
               headers: {'Content-Type': 'application/json'},
               method: 'POST',
@@ -489,9 +490,8 @@ app.listen(4000, () => {
   console.log('Running a GraphQL API server at localhost:4000/graphql');
 });
 
+
 function ensureAuthenticated(req, res, next) {
-  console.log("isAuthed");
-  console.log(req.isAuthenticated());
   if (req.isAuthenticated()) { return next(); }
   res.redirect('/auth/github')
 }
